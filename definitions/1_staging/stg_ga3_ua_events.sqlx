@@ -7,8 +7,7 @@ config {
 SELECT
   SHA256(fullVisitorId || visitId || date) AS row_id,
   CURRENT_TIMESTAMP() AS row_loaded_at,
-  -- note a session can span multiple days:
-  fullVisitorId || visitId AS unique_session_id,
+  fullVisitorId || visitId AS unique_session_id, -- note a session can span multiple days
   'ga3_sessions' AS data_source,
   fullVisitorId AS full_visitor_id,
   visitNumber AS session_number,
@@ -52,11 +51,6 @@ SELECT
     geoNetwork.longitude AS longitude ) AS location,
   ARRAY(
   SELECT
-    AS STRUCT session_custom_dimensions.index AS INDEX, session_custom_dimensions.value AS value
-  FROM
-    UNNEST(customDimensions) AS session_custom_dimensions ) AS session_custom_dimensions,
-  ARRAY(
-  SELECT
     AS STRUCT hits.hitNumber AS hit_number, hits.isEntrance AS is_entrance, hits.isExit AS is_exit, hits.time AS hit_time_from_session_start, LOWER(hits.type) AS hit_type, STRUCT( LOWER(hits.eventInfo.eventCategory) AS event_category,
       LOWER(hits.eventInfo.eventAction) AS event_action,
       LOWER(hits.eventInfo.eventLabel) AS event_label,
@@ -74,7 +68,7 @@ SELECT
       hits.page.hostname AS host_name,
       hits.page.pageTitle AS page_title,
       CAST(NULL AS string) AS page_location ) AS page, STRUCT( hits.transaction.transactionID AS transaction_id,
-      hits.transaction.localTransactionRevenue AS gross_sales_amount_local ) AS TRANSACTION, ARRAY(
+      hits.transaction.localTransactionRevenue AS local_transaction_revenue ) AS TRANSACTION, ARRAY(
     SELECT
       AS STRUCT SPLIT(product.productSKU, '-')[SAFE_OFFSET(0)] AS generic_article_id, product.productvariant AS article_id, SAFE_DIVIDE( product.localProductRevenue, 1000000) AS gross_sales_amount_local, product.productQuantity AS gross_sales_quantity, product.productlistposition AS product_list_position, (
       FROM
