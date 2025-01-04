@@ -22,183 +22,181 @@ pre_operations {
             `delete from ${self()} where session_date >= session_date_checkpoint`
         )
     }
-
-  -- Group distinct attributes by session (ordered by hit_started_at)
-WITH
-  distinct_session_attributes AS (
+    -- Group distinct attributes by session (ordered by hit_started_at)
+  WITH
+    distinct_session_attributes AS (
+    SELECT
+      DISTINCT unique_session_id,
+      full_visitor_id,
+      data_source,
+      session_start_date_pt,
+      FIRST_VALUE(hit_started_at) OVER (session_window) AS session_start_timestamp,
+      LAST_VALUE(site_region IGNORE NULLS) OVER (session_window) AS session_site_region,
+      LAST_VALUE(logged_in IGNORE NULLS) OVER (session_window) AS session_login_status,
+      LAST_VALUE(event_parameter.site_type IGNORE NULLS) OVER (session_window) AS site_type,
+      LAST_VALUE(dynamic_yield_audience_intent_group IGNORE NULLS) OVER (session_window) AS dynamic_yield_intent_group,
+      LAST_VALUE(sfcc_id IGNORE NULLS) OVER (session_window) AS sfcc_id,
+      MAX(session_engaged) OVER (session_window) AS session_engaged,
+      MAX(is_first_visit) OVER (session_window) AS session_type,
+      MIN(ga_session_number) OVER (session_window) AS session_number,
+      --device
+      LAST_VALUE(device_category IGNORE NULLS) OVER (session_window) AS device_category,
+      LAST_VALUE(device_operating_system_version IGNORE NULLS) OVER (session_window) AS device_operating_system_version,
+      LAST_VALUE(device_mobile_brand_name IGNORE NULLS) OVER (session_window) AS device_mobile_brand_name,
+      LAST_VALUE(device_mobile_model_name IGNORE NULLS) OVER (session_window) AS device_mobile_model_name,
+      LAST_VALUE(device_web_info_browser IGNORE NULLS) OVER (session_window) AS device_browser,
+      --geo
+      LAST_VALUE(geo_country IGNORE NULLS) OVER (session_window) AS geo_country,
+      LAST_VALUE(geo_region IGNORE NULLS) OVER (session_window) AS geo_state_name,
+      LAST_VALUE(geo_city IGNORE NULLS) OVER (session_window) AS geo_city_name,
+      LAST_VALUE(geo_metro IGNORE NULLS) OVER (session_window) AS geo_metro_name
+    FROM
+      ${ref("int_ga4_events")}
+      -- staged_ecommerce.digital_events_ga4 contains data from 30 days prior to GA4 cutover date so this filter is needed
+    WHERE
+      session_start_date_pt >= ${constants.ga4_cutover_date}
+      ${
+          when(incremental(),
+              `and session_date >= session_date_checkpoint`
+          )
+      }
+    WINDOW
+      session_window AS (
+      PARTITION BY
+        unique_session_id
+      ORDER BY
+        hit_started_at ROWS BETWEEN UNBOUNDED PRECEDING
+        AND UNBOUNDED FOLLOWING) )
+        -- final select to bring in struct format
   SELECT
-    DISTINCT unique_session_id,
-    full_visitor_id,
+    SHA256(distinct_session_attributes.unique_session_id || '_' || distinct_session_attributes.session_start_date_pt) AS row_id,
+    CURRENT_TIMESTAMP() AS row_loaded_at,
+    session_start_timestamp AS row_created_earliest_at,
+    distinct_session_attributes.session_start_date_pt,
+    distinct_session_attributes.unique_session_id,
     data_source,
-    session_start_date_pt,
-    FIRST_VALUE(hit_started_at) OVER (session_window) AS session_start_timestamp,
-    LAST_VALUE(site_region IGNORE NULLS) OVER (session_window) AS session_site_region,
-    LAST_VALUE(logged_in IGNORE NULLS) OVER (session_window) AS session_login_status,
-    LAST_VALUE(event_parameter.site_type IGNORE NULLS) OVER (session_window) AS site_type,
-    LAST_VALUE(dynamic_yield_audience_intent_group IGNORE NULLS) OVER (session_window) AS dynamic_yield_intent_group,
-    LAST_VALUE(sfcc_id IGNORE NULLS) OVER (session_window) AS sfcc_id,
-    MAX(session_engaged) OVER (session_window) AS session_engaged,
-    MAX(is_first_visit) OVER (session_window) AS session_type,
-    MIN(ga_session_number) OVER (session_window) AS session_number,
-    --device
-    LAST_VALUE(device_category IGNORE NULLS) OVER (session_window) AS device_category,
-    LAST_VALUE(device_operating_system_version IGNORE NULLS) OVER (session_window) AS device_operating_system_version,
-    LAST_VALUE(device_mobile_brand_name IGNORE NULLS) OVER (session_window) AS device_mobile_brand_name,
-    LAST_VALUE(device_mobile_model_name IGNORE NULLS) OVER (session_window) AS device_mobile_model_name,
-    LAST_VALUE(device_web_info_browser IGNORE NULLS) OVER (session_window) as device_browser,
-    --geo
-    LAST_VALUE(geo_country IGNORE NULLS) OVER (session_window) AS geo_country,
-    LAST_VALUE(geo_region IGNORE NULLS) OVER (session_window) AS geo_state_name,
-    LAST_VALUE(geo_city IGNORE NULLS) OVER (session_window) AS geo_city_name,
-    LAST_VALUE(geo_metro IGNORE NULLS) OVER (session_window) AS geo_metro_name
-  FROM
-    ${ref("int_ga4_events")}
-    -- staged_ecommerce.digital_events_ga4 contains data from 30 days prior to GA4 cutover date so this filter is needed
-  WHERE
-    session_start_date_pt >= ${constants.ga4_cutover_date}
-    ${
-        when(incremental(),
-            `and session_date >= session_date_checkpoint`
-        )
-    }
-  WINDOW
-    session_window AS (
-    PARTITION BY
-      unique_session_id
-    ORDER BY
-      hit_started_at ROWS BETWEEN UNBOUNDED PRECEDING
-      AND UNBOUNDED FOLLOWING) )
-
--- final select to bring in struct format
-SELECT
-  SHA256(distinct_session_attributes.unique_session_id || '_' || distinct_session_attributes.session_start_date_pt) AS row_id,
-  CURRENT_TIMESTAMP() AS row_loaded_at,
-  session_start_timestamp AS row_created_earliest_at,
-  distinct_session_attributes.session_start_date_pt,
-  distinct_session_attributes.unique_session_id,
-  data_source,
-  STRUCT( session_site_region,
-    distinct_session_attributes.full_visitor_id,
-    session_number,
-    session_login_status,
-    --truncating to second granularity to match GA UA
-    DATETIME_TRUNC(DATETIME(session_start_timestamp, "America/Vancouver"), second) AS session_start_time_pt,
-    CASE
-      WHEN session_type = 1 THEN 'New Visit'
-      ELSE 'Returning Visit'
-  END
-    AS session_type,
-    CASE
-      WHEN session_engaged = 1 THEN TRUE
-      ELSE FALSE
-  END
-    AS is_engaged_session,
-    STRUCT( last_non_direct.traffic_source_keyword AS keyword,
-      last_non_direct.traffic_source_medium AS medium,
-      last_non_direct.traffic_source_campaign AS campaign,
-      last_non_direct.traffic_source_campaign_id AS campaign_id,
-      last_non_direct.traffic_source_ad_content AS ad_content,
-      last_non_direct.traffic_source_name AS name,
-      last_non_direct.traffic_source_source AS traffic_channel,
+    STRUCT( session_site_region,
+      distinct_session_attributes.full_visitor_id,
+      session_number,
+      session_login_status,
+      --truncating to second granularity to match GA UA
+      DATETIME_TRUNC(DATETIME(session_start_timestamp, "America/Vancouver"), second) AS session_start_time_pt,
       CASE
-      -- Clientele App (Previously known as DST: Selling Tool): medium = dst
-        WHEN LOWER(last_non_direct.traffic_source_medium) = 'dst' THEN 'Clientele App'
-        -- Cross-network: Campaign Name contains "cross-network"
-        WHEN REGEXP_CONTAINS(last_non_direct.traffic_source_campaign, r"cross-network") THEN 'Paid Search'
-        -- Paid Shopping:
-        --   (Source matches a list of shopping sites
-        --   OR
-        --   Campaign Name matches regex ^(.*(([^a-df-z]|^)shop|shopping).*)$)
-        --   AND
-        --   Medium matches regex ^(.*cp.*|ppc|retargeting|paid.*)$
-        WHEN ( ga4_source_categories.source_category = 'SOURCE_CATEGORY_SHOPPING' OR REGEXP_CONTAINS(last_non_direct.traffic_source_campaign, r"^(.*(([^a-df-z]|^)shop|shopping).*)$") ) AND REGEXP_CONTAINS(last_non_direct.traffic_source_medium,r"^(.*cp.*|ppc|retargeting|paid.*)$") THEN 'Paid Search'
-        -- Paid Search:
-        --   Source matches a list of search sites
-        --   AND
-        --   Medium matches regex ^(.*cp.*|ppc|retargeting|paid.*)$
-        WHEN ga4_source_categories.source_category = 'SOURCE_CATEGORY_SEARCH'
-      AND REGEXP_CONTAINS(last_non_direct.traffic_source_medium, r"^(.*cp.*|ppc|retargeting|paid.*)$") THEN 'Paid Search'
-      -- Paid Social:
-      --   Source matches a regex list of social sites
-      --   AND
-      --   Medium matches regex ^(.*cp.*|ppc|retargeting|paid.*)$
-        WHEN ga4_source_categories.source_category = 'SOURCE_CATEGORY_SOCIAL' AND REGEXP_CONTAINS(last_non_direct.traffic_source_medium, r"^(.*cp.*|ppc|retargeting|paid.*)$") THEN 'Paid Social'
-        -- Display:
-        --   Medium is one of ("display", "banner", "expandable", "interstitial", "cpm")
-        WHEN last_non_direct.traffic_source_medium IN ('display',
-        'banner',
-        'expandable',
-        'interstitial',
-        'cpm') THEN 'Display'
-        -- Email:
-        --   Source = email|e-mail|e_mail|e mail
-        --   OR
-        --   Medium = email|e-mail|e_mail|e mail
-        WHEN REGEXP_CONTAINS(last_non_direct.traffic_source_source, r"email|e-mail|e_mail|e mail") OR REGEXP_CONTAINS(last_non_direct.traffic_source_medium, r"email|e-mail|e_mail|e mail") THEN 'Email'
-        -- Organic Search:
-        --   Source matches a list of search sites
-        --   OR
-        --   Medium exactly matches organic
-        WHEN ga4_source_categories.source_category = 'SOURCE_CATEGORY_SEARCH'
-      OR last_non_direct.traffic_source_medium = 'organic' THEN 'Organic Search'
-      -- Organic Shopping: Map to GA3's Social Category
-      --   Source matches a list of shopping sites
-      --   OR
-      --   Campaign name matches regex ^(.*(([^a-df-z]|^)shop|shopping).*)$
-        WHEN ga4_source_categories.source_category = 'SOURCE_CATEGORY_SHOPPING' OR REGEXP_CONTAINS(last_non_direct.traffic_source_campaign, r"^(.*(([^a-df-z]|^)shop|shopping).*)$") THEN 'Organic Search'
-        -- Organic Social:
-        --   Source matches a regex list of social sites or video sites
-        --   OR
-        --   Medium is one of ("social", "social-network", "social-media", "sm", "social network", "social media")
-        WHEN ga4_source_categories.source_category IN ('SOURCE_CATEGORY_SOCIAL',
-        'SOURCE_CATEGORY_VIDEO')
-      OR last_non_direct.traffic_source_medium IN ("Social",
-        "social",
-        "social-network",
-        "social-media",
-        "sm",
-        "social network",
-        "social media")
-      OR REGEXP_CONTAINS(last_non_direct.traffic_source_medium, r"^(.*video.*)$") THEN 'Social'
-      -- Affiliates:
-      --   Medium = affiliate
-        WHEN last_non_direct.traffic_source_medium = 'affiliate' OR last_non_direct.traffic_source_source = 'rstyle.me' THEN 'Affiliates'
-        -- Audio:
-        --   Medium exactly matches audio
-        WHEN last_non_direct.traffic_source_medium = 'audio' THEN 'Audio'
-        -- SMS:
-        --   Source exactly matches sms
-        --   OR
-        --   Medium exactly matches sms
-        WHEN last_non_direct.traffic_source_source = 'sms' OR last_non_direct.traffic_source_medium = 'sms' THEN 'SMS'
-        -- Mobile Push Notifications:
-        --   Medium ends with "push"
-        --   OR
-        --   Medium contains "mobile" or "notification"
-        --   OR
-        --   Source exactly matches "firebase"
-        WHEN REGEXP_CONTAINS(last_non_direct.traffic_source_medium, r"push$")
-      OR REGEXP_CONTAINS(last_non_direct.traffic_source_medium, r"mobile|notification")
-      OR last_non_direct.traffic_source_source = 'firebase' THEN 'Mobile Push Notifications'
-      -- Referral:
-      --   Medium is one of ("referral", "app", or "link")
-        WHEN last_non_direct.traffic_source_medium IN ("referral", "app", "link") THEN 'Referral'
-        -- Direct: Source exactly matches "(direct)" AND Medium is one of ("(not set)", "(none)")
-        WHEN ( last_non_direct.traffic_source_source IS NULL
-        AND last_non_direct.traffic_source_medium IS NULL )
-      OR ( last_non_direct.traffic_source_source = '(direct)'
-        AND (last_non_direct.traffic_source_medium = '(none)'
-          OR last_non_direct.traffic_source_medium = '(not set)') ) THEN 'Direct'
-          -- Unassigned/(Other) is the value Analytics uses when there are no other channel rules that match the event data.
-        ELSE '(Other)'
+        WHEN session_type = 1 THEN 'New Visit'
+        ELSE 'Returning Visit'
     END
-      AS traffic_category ) AS traffic_source,
-    STRUCT( device_category,
-      CONCAT(device_mobile_brand_name, ' ', device_mobile_model_name) AS mobile_device_info,
-      device_operating_system_version AS operating_system_version,
-      CAST(NULL AS string) AS screen_resolution, /* not available in the BigQuery export 20240320 */
-      device_browser AS browser
-      ) AS device,
+      AS session_type,
+      CASE
+        WHEN session_engaged = 1 THEN TRUE
+        ELSE FALSE
+    END
+      AS is_engaged_session,
+      STRUCT( last_non_direct.traffic_source_keyword AS keyword,
+        last_non_direct.traffic_source_medium AS medium,
+        last_non_direct.traffic_source_campaign AS campaign,
+        last_non_direct.traffic_source_campaign_id AS campaign_id,
+        last_non_direct.traffic_source_ad_content AS ad_content,
+        last_non_direct.traffic_source_name AS name,
+        last_non_direct.traffic_source_source AS traffic_channel,
+        CASE
+        -- Clientele App (Previously known as DST: Selling Tool): medium = dst
+          WHEN LOWER(last_non_direct.traffic_source_medium) = 'dst' THEN 'Clientele App'
+          -- Cross-network: Campaign Name contains "cross-network"
+          WHEN REGEXP_CONTAINS(last_non_direct.traffic_source_campaign, r"cross-network") THEN 'Paid Search'
+          -- Paid Shopping:
+          --   (Source matches a list of shopping sites
+          --   OR
+          --   Campaign Name matches regex ^(.*(([^a-df-z]|^)shop|shopping).*)$)
+          --   AND
+          --   Medium matches regex ^(.*cp.*|ppc|retargeting|paid.*)$
+          WHEN ( ga4_source_categories.source_category = 'SOURCE_CATEGORY_SHOPPING' OR REGEXP_CONTAINS(last_non_direct.traffic_source_campaign, r"^(.*(([^a-df-z]|^)shop|shopping).*)$") ) AND REGEXP_CONTAINS(last_non_direct.traffic_source_medium,r"^(.*cp.*|ppc|retargeting|paid.*)$") THEN 'Paid Search'
+          -- Paid Search:
+          --   Source matches a list of search sites
+          --   AND
+          --   Medium matches regex ^(.*cp.*|ppc|retargeting|paid.*)$
+          WHEN ga4_source_categories.source_category = 'SOURCE_CATEGORY_SEARCH'
+        AND REGEXP_CONTAINS(last_non_direct.traffic_source_medium, r"^(.*cp.*|ppc|retargeting|paid.*)$") THEN 'Paid Search'
+        -- Paid Social:
+        --   Source matches a regex list of social sites
+        --   AND
+        --   Medium matches regex ^(.*cp.*|ppc|retargeting|paid.*)$
+          WHEN ga4_source_categories.source_category = 'SOURCE_CATEGORY_SOCIAL' AND REGEXP_CONTAINS(last_non_direct.traffic_source_medium, r"^(.*cp.*|ppc|retargeting|paid.*)$") THEN 'Paid Social'
+          -- Display:
+          --   Medium is one of ("display", "banner", "expandable", "interstitial", "cpm")
+          WHEN last_non_direct.traffic_source_medium IN ('display',
+          'banner',
+          'expandable',
+          'interstitial',
+          'cpm') THEN 'Display'
+          -- Email:
+          --   Source = email|e-mail|e_mail|e mail
+          --   OR
+          --   Medium = email|e-mail|e_mail|e mail
+          WHEN REGEXP_CONTAINS(last_non_direct.traffic_source_source, r"email|e-mail|e_mail|e mail") OR REGEXP_CONTAINS(last_non_direct.traffic_source_medium, r"email|e-mail|e_mail|e mail") THEN 'Email'
+          -- Organic Search:
+          --   Source matches a list of search sites
+          --   OR
+          --   Medium exactly matches organic
+          WHEN ga4_source_categories.source_category = 'SOURCE_CATEGORY_SEARCH'
+        OR last_non_direct.traffic_source_medium = 'organic' THEN 'Organic Search'
+        -- Organic Shopping: Map to GA3's Social Category
+        --   Source matches a list of shopping sites
+        --   OR
+        --   Campaign name matches regex ^(.*(([^a-df-z]|^)shop|shopping).*)$
+          WHEN ga4_source_categories.source_category = 'SOURCE_CATEGORY_SHOPPING' OR REGEXP_CONTAINS(last_non_direct.traffic_source_campaign, r"^(.*(([^a-df-z]|^)shop|shopping).*)$") THEN 'Organic Search'
+          -- Organic Social:
+          --   Source matches a regex list of social sites or video sites
+          --   OR
+          --   Medium is one of ("social", "social-network", "social-media", "sm", "social network", "social media")
+          WHEN ga4_source_categories.source_category IN ('SOURCE_CATEGORY_SOCIAL',
+          'SOURCE_CATEGORY_VIDEO')
+        OR last_non_direct.traffic_source_medium IN ("Social",
+          "social",
+          "social-network",
+          "social-media",
+          "sm",
+          "social network",
+          "social media")
+        OR REGEXP_CONTAINS(last_non_direct.traffic_source_medium, r"^(.*video.*)$") THEN 'Social'
+        -- Affiliates:
+        --   Medium = affiliate
+          WHEN last_non_direct.traffic_source_medium = 'affiliate' OR last_non_direct.traffic_source_source = 'rstyle.me' THEN 'Affiliates'
+          -- Audio:
+          --   Medium exactly matches audio
+          WHEN last_non_direct.traffic_source_medium = 'audio' THEN 'Audio'
+          -- SMS:
+          --   Source exactly matches sms
+          --   OR
+          --   Medium exactly matches sms
+          WHEN last_non_direct.traffic_source_source = 'sms' OR last_non_direct.traffic_source_medium = 'sms' THEN 'SMS'
+          -- Mobile Push Notifications:
+          --   Medium ends with "push"
+          --   OR
+          --   Medium contains "mobile" or "notification"
+          --   OR
+          --   Source exactly matches "firebase"
+          WHEN REGEXP_CONTAINS(last_non_direct.traffic_source_medium, r"push$")
+        OR REGEXP_CONTAINS(last_non_direct.traffic_source_medium, r"mobile|notification")
+        OR last_non_direct.traffic_source_source = 'firebase' THEN 'Mobile Push Notifications'
+        -- Referral:
+        --   Medium is one of ("referral", "app", or "link")
+          WHEN last_non_direct.traffic_source_medium IN ("referral", "app", "link") THEN 'Referral'
+          -- Direct: Source exactly matches "(direct)" AND Medium is one of ("(not set)", "(none)")
+          WHEN ( last_non_direct.traffic_source_source IS NULL
+          AND last_non_direct.traffic_source_medium IS NULL )
+        OR ( last_non_direct.traffic_source_source = '(direct)'
+          AND (last_non_direct.traffic_source_medium = '(none)'
+            OR last_non_direct.traffic_source_medium = '(not set)') ) THEN 'Direct'
+            -- Unassigned/(Other) is the value Analytics uses when there are no other channel rules that match the event data.
+          ELSE '(Other)'
+      END
+        AS traffic_category ) AS traffic_source,
+      STRUCT( device_category,
+        CONCAT(device_mobile_brand_name, ' ', device_mobile_model_name) AS mobile_device_info,
+        device_operating_system_version AS operating_system_version,
+        CAST(NULL AS string) AS screen_resolution,
+        /* not available in the BigQuery export 20240320 */
+        device_browser AS browser ) AS device,
       STRUCT( geo_country AS country_name,
         geo_state_name AS province_state_name,
         geo_city_name AS city_name ) AS location ) AS digital_session
@@ -216,5 +214,3 @@ SELECT
   WHERE
     distinct_session_attributes.unique_session_id IS NOT NULL
     AND distinct_session_attributes.full_visitor_id IS NOT NULL
-
-

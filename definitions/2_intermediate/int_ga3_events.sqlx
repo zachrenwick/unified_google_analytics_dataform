@@ -1,0 +1,103 @@
+config {
+    schema: "modeled_ecommerce",
+    type: "incremental",
+    bigquery: {
+        partitionBy: "event_date",
+        clusterBy: ["ga_session_key"],
+    }
+}
+
+SELECT
+  CURRENT_TIMESTAMP() AS row_loaded_at,
+  data_source,
+  event_date,
+  ga_session_key,
+  STRUCT( CAST(NULL AS string) AS event_name,
+    hit_number,
+    hit_type,
+    is_entrance,
+    is_exit,
+    hit_time_from_session_start,
+    TIMESTAMP_ADD(TIMESTAMP(session_start_time_pt, 'America/Vancouver'), INTERVAL (hit.hit_time_from_session_start) millisecond) AS hit_started_at,
+    STRUCT( event_info.event_category,
+      event_info.event_action,
+      event_info.event_label ) AS event_info,
+    page,
+    --transaction.transaction_id,
+    CASE
+      WHEN event_info.event_action = 'product click' THEN TRUE
+      ELSE FALSE
+  END
+    AS is_product_click_event,
+    CASE
+      WHEN hit.event_info.event_category = 'ecommerce' AND hit.event_info.event_action = 'promotion click' THEN TRUE
+      ELSE FALSE
+  END
+    AS is_promotion_click_event,
+    CASE
+      WHEN event_info.event_category = 'pdp' AND event_info.event_action = 'size click' THEN TRUE
+      ELSE FALSE
+  END
+    AS is_size_click_event,
+    CASE
+      WHEN hit.event_info.event_category = 'plp' AND hit.event_info.event_action = 'product-list-filter' THEN TRUE
+      ELSE FALSE
+  END
+    AS is_filter_applied_event,
+    CASE
+      WHEN event_info.event_category = 'ecommerce' AND event_info.event_action ='add to bag' THEN TRUE
+      ELSE FALSE
+  END
+    AS is_add_to_bag_event,
+    CASE
+      WHEN event_info.event_category = 'ecommerce' AND event_info.event_action ='remove from bag' THEN TRUE
+      ELSE FALSE
+  END
+    AS is_remove_from_bag_event,
+    CASE
+      WHEN event_info.event_category = 'account' AND event_info.event_action ='view wishlist' THEN TRUE
+      ELSE FALSE
+  END
+    AS is_mylist_seen_event,
+    CASE
+      WHEN event_info.event_category = 'account' AND event_info.event_action ='add to wishlist' THEN TRUE
+      ELSE FALSE
+  END
+    AS is_add_to_mylist_event,
+    CASE
+      WHEN event_info.event_category = 'ecommerce' AND event_info.event_action ='view my bag' THEN TRUE
+      ELSE FALSE
+  END
+    AS is_bag_seen_event,
+    CASE
+      WHEN event_info.event_category = 'ecommerce' AND event_info.event_action ='view mini bag' THEN TRUE
+      ELSE FALSE
+  END
+    AS is_minibag_seen_event,
+    CASE
+      WHEN event_info.event_category = 'ecommerce' AND event_info.event_action ='sign in notification' THEN TRUE
+      ELSE FALSE
+  END
+    AS is_login_completed_event,
+    CASE
+      WHEN event_info.event_category = 'account' AND event_info.event_action = 'create account' THEN TRUE
+      ELSE FALSE
+  END
+    CASE
+      WHEN hit_type = 'page' AND page.page_path LIKE '%/checkout%' THEN TRUE
+      ELSE FALSE
+  END
+    AS is_checkout_seen_event,
+    CASE
+      WHEN hit.event_info.event_action = 'complete order' THEN TRUE
+      ELSE FALSE
+  END
+    AS is_checkout_complete_event ) AS hit
+FROM
+  ${ref("stg_ga3_events")},
+  UNNEST(hit) AS hit
+  -- when incremental, do nothing
+  ${
+      when(incremental(),
+          `where 0=1`)
+  }
