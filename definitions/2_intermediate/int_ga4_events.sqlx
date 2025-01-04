@@ -3,8 +3,26 @@ config {
     description: "WHY: Google Analytics 4 data can be overwritten up to 72 hours later",
     type: "incremental",
     bigquery: {
-        partitionBy: "session_start_date_pt",
+        partitionBy: "event_date",
         clusterBy: ["unique_session_id", "event_name"]
+    }
+}
+
+
+pre_operations {
+  DECLARE
+    event_date_checkpoint DEFAULT (
+    ${
+        when(incremental(),
+            `select max(event_date) -3 from ${self()}`,
+            `select date("2000-01-01")`
+        )
+    }
+    );
+    ${
+        when(incremental(),
+            `delete from ${self()} where event_date >= event_date_checkpoint`
+        )
     }
 }
 
@@ -174,16 +192,6 @@ WITH
         search_type,
         error_location,
         error_message,
-        checkout_type,
-        checkout_method,
-        checkout_step_name,
-        INITCAP(payment_type) AS payment_type,
-        CASE
-          WHEN session_start_date_pt BETWEEN '2024-04-15' AND '2024-08-22' THEN 'SiteGen'
-          ELSE site_type
-      END
-        AS site_type,
-        /* Tracking was not set up until Aug 22, 2024 */
         user_agent_string ) AS event_parameter,
       hit_started_at,
       ARRAY(
@@ -195,21 +203,6 @@ WITH
         SPLIT(page_path,'/')[SAFE_OFFSET(3)] AS page_path_level3,
         SPLIT(page_path,'/')[SAFE_OFFSET(4)] AS page_path_level4,
         SPLIT(page_path,'/')[SAFE_OFFSET(5)] AS page_path_level5,
-        CASE
-          WHEN REGEXP_CONTAINS(page_path, r'.*\/(brands|gifts|shop-by|on\/.*)$') THEN 'Other'
-          WHEN REGEXP_CONTAINS(page_path, r'.*\/product') THEN 'PDP'
-          WHEN REGEXP_CONTAINS(page_path, r'.*\/search') THEN 'Search'
-          WHEN REGEXP_CONTAINS(page_path, r'.*\/(sale|new|brands|clothing|shop-by|favourites-1|accessories|gifts)') THEN 'PLP'
-          WHEN REGEXP_CONTAINS(page_path, r'.*\/stories') THEN 'Stories'
-          WHEN REGEXP_CONTAINS(page_path, r'.*\/cart') THEN 'Cart'
-          WHEN REGEXP_CONTAINS(page_path, r'.*\/checkout') THEN 'Checkout'
-          WHEN REGEXP_CONTAINS(page_path, r'.*\/(my-account|mylist)') THEN 'Account'
-          WHEN REGEXP_CONTAINS(page_path, r'.*\/(order-history|order-tracking|track-package)') THEN 'Orders'
-          WHEN REGEXP_CONTAINS(page_path, r'.*\/store-locator') THEN 'Store Locator'
-          WHEN REGEXP_CONTAINS(page_path, r'(^\/|.*\/(home|en|fr|us|ca|default))(\/)?$') THEN 'Homepage'
-          ELSE 'Other'
-      END
-        AS page_category,
         host_name,
         page_title,
         page_location ) AS page,
@@ -256,28 +249,10 @@ WITH
       geo_city
     FROM
       unnesting_events
-    WHERE
-      -- identified as bot traffic to filter out
-      view_port != '1920x993'
+      
       ${
           when(incremental(),
-              `and session_start_date_pt >= session_date_checkpoint`
+              `where session_start_date_pt >= session_date_checkpoint`
           )
       }
 
-pre_operations {
-  DECLARE
-    session_date_checkpoint DEFAULT (
-    ${
-        when(incremental(),
-            `select max(session_start_date_pt) -4 from ${self()}`,
-            `select date("2000-01-01")`
-        )
-    }
-    );
-    ${
-        when(incremental(),
-            `delete from ${self()} where session_start_date_pt >= session_date_checkpoint`
-        )
-    }
-}

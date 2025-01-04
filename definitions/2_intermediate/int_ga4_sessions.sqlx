@@ -3,7 +3,7 @@ config {
     description: "",
     type: "incremental",
     bigquery: {
-        partitionBy: "session_start_date_pt"
+        partitionBy: "session_date"
     }
 }
 
@@ -12,14 +12,14 @@ pre_operations {
     session_date_checkpoint DEFAULT (
     ${
         when(incremental(),
-            `select max(session_start_date_pt) -3 from ${self()}`,
+            `select max(session_date) -3 from ${self()}`,
             `select date("2000-01-01")`
         )
     }
     );
     ${
         when(incremental(),
-            `delete from ${self()} where session_start_date_pt >= session_date_checkpoint`
+            `delete from ${self()} where session_date >= session_date_checkpoint`
         )
     }
 
@@ -58,7 +58,7 @@ WITH
     session_start_date_pt >= ${constants.ga4_cutover_date}
     ${
         when(incremental(),
-            `and session_start_date_pt >= session_date_checkpoint`
+            `and session_date >= session_date_checkpoint`
         )
     }
   WINDOW
