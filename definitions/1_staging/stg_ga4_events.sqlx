@@ -14,6 +14,7 @@ pre_operations {
     ${
         when(incremental(),
             `select max(event_date) -3 from ${self()}`,
+            `select (${constants.ga4_cutover_date})-30`
         )
     }
     );
@@ -23,7 +24,6 @@ pre_operations {
         )
     }
 }
-
 
 WITH
   unnested_events AS (
@@ -47,13 +47,6 @@ WITH
     ${helpers.getEventParam('previous_click_component')},
     ${helpers.getEventParam('previous_click_id')},
     ${helpers.getEventParam('previous_url')},
-    ${helpers.getEventParam('error_type')},
-    ${helpers.getEventParam('method')},
-    ${helpers.getEventParam('error_location')},
-    ${helpers.getEventParam('error_message')},
-    ${helpers.getEventParam('checkout_type')},
-    ${helpers.getEventParam('checkout_method')},
-    ${helpers.getEventParam('checkout_step_name')},
     ${helpers.getEventParam('payment_type')},
     ${helpers.getEventParam('panel_name')},
     ${helpers.getEventParam('bag_viewed_type')},
@@ -128,33 +121,23 @@ WITH
             WHEN event_name = 'purchase' THEN items.quantity
             ELSE NULL
         END
-          AS gross_sales_quantity, SAFE_CAST(items.item_list_index AS int) AS product_list_position, ${helpers.getItemParam('delivery_method', 'string', 'service_subtype')}
-          --also known as delivery_method,
+          AS gross_sales_quantity, SAFE_CAST(items.item_list_index AS int) AS item_list_index, 
+      
         FROM
           UNNEST(items) AS items ) AS article
       FROM
   ${ref("events_*")}
 WHERE
   -- to account for 30 day session traffic source attribution lookback window
-  RIGHT(_table_suffix, 8) >= FORMAT_DATE('%Y%m%d',${constants.ga4_cutover_date} - 30)
-  AND _table_suffix NOT LIKE "%intraday%"
+  _table_suffix NOT LIKE "%intraday%"
   AND _table_suffix NOT LIKE "%fresh%"
-  -- to remove events_fresh_ and events_intraday_ shards
-  /* if dev or feature branch, use limited TY and LY dates to reduce data processed while still allowing YoY comp testing */
-  -- ${typeof dataform.projectConfig.vars.envName === 'undefined' || dataform.projectConfig.vars.envName === 'dev' ? "and ( right(_table_suffix, 8) >= format_date('%Y%m%d', date_sub(current_date(), interval 3 week)) or right(_table_suffix, 8) between format_date('%Y%m%d', date_sub(current_date(), interval 55 week)) and format_date('%Y%m%d',date_sub(current_date(), interval 1 year)))" : ""}
-
-        ${
-            when(incremental(),
-                `and session_start_date_pt >= session_date_checkpoint`
-            )
-        }
-        )
+  and cast(_table_suffix as date format '%Y%m%d') >= event_date_checkpoint
+  )
 
 
  -- final select
     SELECT
       CURRENT_TIMESTAMP() AS row_loaded_at,
-      data_source,
       event_date,
       unique_session_id,
       user_pseudo_id,
@@ -180,20 +163,13 @@ WHERE
         status,
         bag_viewed_type,
         list_type,
-        method,
         CASE
           WHEN search_term = 'null' THEN NULL
           ELSE search_term
       END
         AS search_term,
         search_type,
-        error_location,
-        error_message,
-        checkout_type,
-        checkout_method,
-        checkout_step_name,
         INITCAP(payment_type) AS payment_type,
-     
         user_agent_string ) AS event_parameter,
       hit_started_at,
       ARRAY(

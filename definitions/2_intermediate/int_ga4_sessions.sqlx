@@ -4,8 +4,7 @@ config {
     type: "incremental",
     bigquery: {
         partitionBy: "session_start_date_pt"
-    },
-    assertions: {},
+    }
 }
 
 pre_operations {
@@ -53,7 +52,7 @@ WITH
     LAST_VALUE(geo_city IGNORE NULLS) OVER (session_window) AS geo_city_name,
     LAST_VALUE(geo_metro IGNORE NULLS) OVER (session_window) AS geo_metro_name
   FROM
-    ${ref("staging", "stg_ga4_events")}
+    ${ref("int_ga4_events")}
     -- staged_ecommerce.digital_events_ga4 contains data from 30 days prior to GA4 cutover date so this filter is needed
   WHERE
     session_start_date_pt >= ${constants.ga4_cutover_date}
@@ -206,7 +205,7 @@ SELECT
   FROM
     distinct_session_attributes
   LEFT OUTER JOIN
-    ${ref("staged_ecommerce", "traffic_source_session_attribution_ga4")} AS traffic_source
+    ${ref("int_ga4_last_non_direct_attribution")} AS traffic_source
   ON
     traffic_source.unique_session_id = distinct_session_attributes.unique_session_id
     AND traffic_source.session_start_date_pt = distinct_session_attributes.session_start_date_pt
