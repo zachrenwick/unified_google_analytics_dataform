@@ -210,7 +210,7 @@ SELECT
     traffic_source.unique_session_id = distinct_session_attributes.unique_session_id
     AND traffic_source.session_start_date_pt = distinct_session_attributes.session_start_date_pt
   LEFT OUTER JOIN
-    ${ref("cleansed_ga4_prd", "ga4_source_categories")} AS ga4_source_categories
+    ${ref("stg_ga4_source_categories")} AS ga4_source_categories
   ON
     ga4_source_categories.source = traffic_source.last_non_direct.traffic_source_source
   WHERE
