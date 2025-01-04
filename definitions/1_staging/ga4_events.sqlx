@@ -6,6 +6,7 @@ config {
 
 SELECT
   *,
+  CURRENT_TIMESTAMP() AS row_loaded_at,
   'ga4_events' AS data_source,
   -- use ending 8 characters because realtime data stream has _intraday_202401xx string in _table_suffix
   CAST(RIGHT(_table_suffix, 8) AS date format 'YYYYMMDD') AS event_date
@@ -13,9 +14,9 @@ FROM
   ${ref("events_*")}
 WHERE
   -- to account for 30 day session traffic source attribution lookback window
- -- RIGHT(_table_suffix, 8) >= FORMAT_DATE('%Y%m%d',${constants.ga4_cutover_date} - 30)
-   REGEXP_REPLACE(_table_suffix, r'[0-9]+','accepted value') = 'accepted value'
+  RIGHT(_table_suffix, 8) >= FORMAT_DATE('%Y%m%d',${constants.ga4_cutover_date} - 30)
+  AND _table_suffix NOT LIKE "%intraday%"
+  AND _table_suffix NOT LIKE "%fresh%"
   -- to remove events_fresh_ and events_intraday_ shards
-
-/* if dev or feature branch, use limited TY and LY dates to reduce data processed while still allowing YoY comp testing */
- -- ${typeof dataform.projectConfig.vars.envName === 'undefined' || dataform.projectConfig.vars.envName === 'dev' ? "and ( right(_table_suffix, 8) >= format_date('%Y%m%d', date_sub(current_date(), interval 3 week)) or right(_table_suffix, 8) between format_date('%Y%m%d', date_sub(current_date(), interval 55 week)) and format_date('%Y%m%d',date_sub(current_date(), interval 1 year)))" : ""}
+  /* if dev or feature branch, use limited TY and LY dates to reduce data processed while still allowing YoY comp testing */
+  -- ${typeof dataform.projectConfig.vars.envName === 'undefined' || dataform.projectConfig.vars.envName === 'dev' ? "and ( right(_table_suffix, 8) >= format_date('%Y%m%d', date_sub(current_date(), interval 3 week)) or right(_table_suffix, 8) between format_date('%Y%m%d', date_sub(current_date(), interval 55 week)) and format_date('%Y%m%d',date_sub(current_date(), interval 1 year)))" : ""}

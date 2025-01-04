@@ -1,0 +1,100 @@
+config {
+    schema: "staging",
+    description: "WHAT: Provides raw hit level data export from Google Analytics (Universal Analytics). Each row represents a record for every digital session and each hit level event lives within the hits struct. Data is loaded from a native Google integration between GA and BigQuery. Information on this GA export is available here: https://support.google.com/analytics/answer/3437719?hl=en . Partitioned by session_start_date_pt and clustered by data_source and unique_session_id. \r\nWHEN: Data is available for all digital events dating back to FY2020. \r\nWHO: eCommerce \r\nWHY: Provides the ability to analyze each session and event that is tracked on A.com.",
+    type: "view"
+}
+
+SELECT
+  SHA256(fullVisitorId || visitId || date) AS row_id,
+  CURRENT_TIMESTAMP() AS row_loaded_at,
+  -- note a session can span multiple days:
+  fullVisitorId || visitId AS unique_session_id,
+  'ga3_sessions' AS data_source,
+  fullVisitorId AS full_visitor_id,
+  visitNumber AS session_number,
+  DATETIME( TIMESTAMP_SECONDS(visitStartTime), "America/Vancouver") AS session_start_time_pt,
+  PARSE_DATE("%Y%m%d", _table_suffix) AS event_date,
+  STRUCT( totals.bounces AS bounce_count,
+    totals.hits AS hit_count,
+    totals.newVisits AS new_session_count,
+    totals.pageviews AS page_view_count,
+    SAFE_DIVIDE( totals.totalTransactionRevenue, 1000000) AS total_transaction_revenue,
+    totals.transactions AS transaction_count,
+    totals.visits AS session_count ) AS total,
+  STRUCT( trafficSource.adContent AS ad_content,
+    trafficSource.campaign AS campaign,
+    trafficSource.campaignCode AS campaign_id,
+    trafficSource.keyword,
+    trafficSource.medium,
+    trafficSource.source,
+    CASE
+      WHEN LOWER(trafficSource.source) = 'rstyle.me' THEN 'Affiliates'
+      WHEN LOWER(trafficSource.source) = 'sms' THEN 'SMS'
+      WHEN LOWER(channelGrouping) = 'dst' OR LOWER(trafficSource.medium) = 'dst' THEN 'Clientele App'
+      ELSE channelGrouping
+  END
+    AS traffic_category ) AS traffic_source,
+  STRUCT( device.deviceCategory AS device_category,
+    device.mobileDeviceInfo AS mobile_device_info,
+    device.operatingSystem || ' ' || device.operatingSystemVersion AS operating_system_version,
+    -- transformation needed to match GA4
+    device.screenResolution AS screen_resolution,
+    device.browser ) AS device,
+  STRUCT( geoNetwork.country AS country_name,
+    CASE
+      WHEN geoNetwork.country IN ('Canada', 'United States') THEN geoNetwork.region
+      WHEN geoNetwork.country IN ('(not set)') THEN 'Unknown'
+      ELSE 'International'
+  END
+    AS province_state_name,
+    geoNetwork.city AS city_name,
+    geoNetwork.latitude AS latitude,
+    geoNetwork.longitude AS longitude ) AS location,
+  ARRAY(
+  SELECT
+    AS STRUCT session_custom_dimensions.index AS INDEX, session_custom_dimensions.value AS value
+  FROM
+    UNNEST(customDimensions) AS session_custom_dimensions ) AS session_custom_dimensions,
+  ARRAY(
+  SELECT
+    AS STRUCT hits.hitNumber AS hit_number, hits.isEntrance AS is_entrance, hits.isExit AS is_exit, hits.time AS hit_time_from_session_start, LOWER(hits.type) AS hit_type, STRUCT( LOWER(hits.eventInfo.eventCategory) AS event_category,
+      LOWER(hits.eventInfo.eventAction) AS event_action,
+      LOWER(hits.eventInfo.eventLabel) AS event_label,
+      hits.eventInfo.eventValue AS event_value ) AS event_info, STRUCT( hits.page.pagePath AS page_path,
+      SPLIT(split(hits.page.pagePath,
+          '?') [SAFE_OFFSET(0)],'/')[SAFE_OFFSET(1)] AS page_path_level1,
+      SPLIT(split(hits.page.pagePath,
+          '?') [SAFE_OFFSET(0)],'/')[SAFE_OFFSET(2)] AS page_path_level2,
+      SPLIT(split(hits.page.pagePath,
+          '?') [SAFE_OFFSET(0)],'/')[SAFE_OFFSET(3)] AS page_path_level3,
+      SPLIT(split(hits.page.pagePath,
+          '?') [SAFE_OFFSET(0)],'/')[SAFE_OFFSET(4)] AS page_path_level4,
+      SPLIT(split(hits.page.pagePath,
+          '?') [SAFE_OFFSET(0)],'/')[SAFE_OFFSET(5)] AS page_path_level5,
+      hits.page.hostname AS host_name,
+      hits.page.pageTitle AS page_title,
+      CAST(NULL AS string) AS page_location ) AS page, STRUCT( hits.transaction.transactionID AS transaction_id,
+      hits.transaction.localTransactionRevenue AS gross_sales_amount_local ) AS TRANSACTION, ARRAY(
+    SELECT
+      AS STRUCT SPLIT(product.productSKU, '-')[SAFE_OFFSET(0)] AS generic_article_id, product.productvariant AS article_id, SAFE_DIVIDE( product.localProductRevenue, 1000000) AS gross_sales_amount_local, product.productQuantity AS gross_sales_quantity, product.productlistposition AS product_list_position, (
+      FROM
+        UNNEST(hits.product) AS product ) AS article, ARRAY(
+      SELECT
+        AS STRUCT promo.promoName AS promotion_name, promo.promoCreative AS promotion_creative_variation, promo.promoId AS promotion_id
+      FROM
+        UNNEST(hits.promotion) AS promo ) AS promotion, ARRAY(
+      SELECT
+        AS STRUCT custom_dimensions.index, custom_dimensions.value
+      FROM
+        UNNEST(hits.customDimensions) AS custom_dimensions ) AS hit_custom_dimensions
+    FROM
+      UNNEST(hits) AS hits ) AS hit
+  FROM
+    ${ref("ga_sessions_*")}
+  WHERE
+    _table_suffix >= FORMAT_DATE('%Y%m%d',${constants.first_date_to_load_data})
+    --convert to YYYYMMDD
+    AND _table_suffix < FORMAT_DATE('%Y%m%d',${constants.ga4_cutover_date})
+    --convert to YYYYMMDD
+    AND totals.visits IS NOT NULL
+    --removing non-interacting sessions as they will show as null. Done to align with GA UI.
