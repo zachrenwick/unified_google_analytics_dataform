@@ -9,9 +9,10 @@ config {
 
 SELECT
   CURRENT_TIMESTAMP() AS row_loaded_at,
-  data_source,
+  --data_source,
   event_date,
   ga_session_key,
+  user_pseudo_id,
   STRUCT( event_name,
     ROW_NUMBER() OVER (PARTITION BY ga_session_key ORDER BY hit_started_at ASC ) AS hit_number,
   IF
@@ -31,7 +32,7 @@ SELECT
     CAST(NULL AS int) AS hit_time_from_session_start,
     hit_started_at,
     page,
-    transaction_id,
+    -- transaction_id,
   IF
     (event_name = 'contact_us', TRUE, FALSE) AS is_contact_us_event,
   IF
@@ -59,7 +60,6 @@ FROM
 WHERE
   ga_session_key IS NOT NULL
   -- dependency datasets contain 30 days prior to GA4 cutover date so this filter is needed
-  AND session_start_date_pt >= ${constants.ga4_cutover_date}
   ${
       when(incremental(),
           `and event_date >= event_date_checkpoint`
@@ -72,7 +72,7 @@ pre_operations {
     ${
         when(incremental(),
             `select max(event_date) -3 from ${self()}`,
-            `select date("2000-01-01")`
+            `select (${constants.ga4_cutover_date})`
         )
     }
     );

@@ -1,6 +1,6 @@
 config {
     schema: "intermediate",
-    description: "WHAT: Helper dataset to attribute last non-direct traffic source attributes to sessions in Google Analytics 4.  \r\nWHY: So that traffic source attributions can be properly allocated. \r\nWHEN: 30 day lookback window",
+    description: "WHAT: Helper dataset to attribute last non-direct traffic source attributes to sessions in Google Analytics 4.  \r\nWHY: So that traffic source attributions can be properly allocated. \r\nWHEN: 30 day lookback window per user",
     type: "view"
 }
 
@@ -8,11 +8,10 @@ config {
 WITH
   events AS (
   SELECT
-    session_start_date_pt,
-    unique_session_id,
-    full_visitor_id,
+    event_date,
+    ga_session_key,
+    user_pseudo_id,
     session_start,
-    traffic_source_name,
     traffic_source_medium,
     traffic_source_source,
     traffic_source_ad_content,
@@ -21,36 +20,34 @@ WITH
     traffic_source_campaign_id,
     hit_started_at
   FROM
-    ${ref("int_ga4_events")} ),
+    ${ref("stg_ga4_events")} ),
   first_and_last_session_attributes AS (
   SELECT
-    session_start_date_pt,
-    unique_session_id,
-    full_visitor_id,
+    event_date,
+    ga_session_key,
+    user_pseudo_id,
     session_start,
     FIRST_VALUE(
     IF
-      ( COALESCE(traffic_source_name, traffic_source_medium, traffic_source_source, traffic_source_ad_content, traffic_source_keyword, traffic_source_campaign, traffic_source_campaign_id) IS NOT NULL, (
+      ( COALESCE(traffic_source_medium, traffic_source_source, traffic_source_ad_content, traffic_source_keyword, traffic_source_campaign, traffic_source_campaign_id) IS NOT NULL, (
         SELECT
-          AS STRUCT traffic_source_name,
-          traffic_source_medium,
+          AS STRUCT traffic_source_medium,
           traffic_source_source,
           traffic_source_ad_content,
           traffic_source_keyword,
           traffic_source_campaign,
-          traffic_source_campaign_id), NULL ) ) OVER(PARTITION BY unique_session_id ORDER BY hit_started_at ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING ) AS session_first_traffic_source,
+          traffic_source_campaign_id), NULL ) ) OVER(PARTITION BY ga_session_key ORDER BY hit_started_at ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING ) AS session_first_traffic_source,
     LAST_VALUE(
     IF
-      ( COALESCE(traffic_source_name, traffic_source_medium, traffic_source_source, traffic_source_ad_content, traffic_source_keyword, traffic_source_campaign, traffic_source_campaign_id) IS NOT NULL, (
+      ( COALESCE(traffic_source_medium, traffic_source_source, traffic_source_ad_content, traffic_source_keyword, traffic_source_campaign, traffic_source_campaign_id) IS NOT NULL, (
         SELECT
-          AS STRUCT traffic_source_name,
-          traffic_source_medium,
+          AS STRUCT traffic_source_medium,
           traffic_source_source,
           traffic_source_ad_content,
           traffic_source_keyword,
           traffic_source_campaign,
-          traffic_source_campaign_id), NULL ) IGNORE NULLS ) OVER(PARTITION BY unique_session_id ORDER BY hit_started_at ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING ) AS session_last_traffic_source,
-    ROW_NUMBER() OVER(PARTITION BY unique_session_id ORDER BY hit_started_at ) AS session_event_number
+          traffic_source_campaign_id), NULL ) IGNORE NULLS ) OVER(PARTITION BY ga_session_key ORDER BY hit_started_at ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING ) AS session_last_traffic_source,
+    ROW_NUMBER() OVER(PARTITION BY ga_session_key ORDER BY hit_started_at ) AS session_event_number
   FROM
     events
     -- select only one row per session
@@ -58,12 +55,11 @@ WITH
     session_event_number = 1 )
     --final select to add structs for first and last non direct traffic source attributes
 SELECT
-  session_start_date_pt,
-  unique_session_id,
-  full_visitor_id,
-  session_start,
+  event_date,
+  ga_session_key,
+  user_pseudo_id,
   session_first_traffic_source,
   -- 30 day lookback
-  IFNULL( session_first_traffic_source, LAST_VALUE(session_last_traffic_source IGNORE NULLS) OVER(PARTITION BY full_visitor_id ORDER BY session_start RANGE BETWEEN 2592000 PRECEDING AND CURRENT ROW ) ) AS last_non_direct
+  IFNULL( session_first_traffic_source, LAST_VALUE(session_last_traffic_source IGNORE NULLS) OVER(PARTITION BY user_pseudo_id ORDER BY session_start RANGE BETWEEN 2592000 PRECEDING AND CURRENT ROW ) ) AS last_non_direct
 FROM
   first_and_last_session_attributes
