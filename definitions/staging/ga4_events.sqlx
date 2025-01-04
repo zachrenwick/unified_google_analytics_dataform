@@ -1,26 +1,21 @@
 config {
     schema: "staging",
-    description: "WHAT: Provides raw hit level data export from Google Analytics 4. Each row represents a single event that occurred on A.com. Data is loaded from a native Google integration between GA4 and BigQuery. Information on this GA export is available here: https://support.google.com/analytics/answer/7029846?hl=en  \r\nWHEN: Data is available for all GA4 events dating back to 2024-04-15. \r\nWHO: eCommerce \r\nWHY: Provides the ability to analyze each event that is tracked on A.com.",
+    description: "Provides raw hit level data export from Google Analytics 4. Each row represents a single event that occurred on A.com. Data is loaded from a native Google integration between GA4 and BigQuery. Information on this GA export is available here: https://support.google.com/analytics/answer/7029846?hl=en ",
     type: "view"
 }
 
 SELECT
   *,
-  TIMESTAMP_MICROS(event_timestamp) AS row_created_earliest_at,
-  CASE
-    WHEN _table_suffix LIKE '%fresh%' THEN 'ga4_events_fresh'
-    ELSE 'ga4_events'
-END
-  AS data_source,
+  'ga4_events' AS data_source,
   -- use ending 8 characters because realtime data stream has _intraday_202401xx string in _table_suffix
-  CAST(RIGHT(_table_suffix, 8) AS date format 'YYYYMMDD') AS session_start_date_pt
+  CAST(RIGHT(_table_suffix, 8) AS date format 'YYYYMMDD') AS event_date
 FROM
   ${ref("events_*")}
 WHERE
   -- to account for 30 day session traffic source attribution lookback window
-  RIGHT(_table_suffix, 8) >= FORMAT_DATE('%Y%m%d',${constants.ga4_cutover_date} - 30)
-  AND REGEXP_REPLACE(_table_suffix, r'[0-9]+','accepted value') = 'accepted value'
+ -- RIGHT(_table_suffix, 8) >= FORMAT_DATE('%Y%m%d',${constants.ga4_cutover_date} - 30)
+   REGEXP_REPLACE(_table_suffix, r'[0-9]+','accepted value') = 'accepted value'
   -- to remove events_fresh_ and events_intraday_ shards
-  AND device.web_info.hostname = 'www.aritzia.com'
-  /* if dev or feature branch, use limited TY and LY dates to reduce data processed while still allowing YoY comp testing */
-  ${typeof dataform.projectConfig.vars.envName === 'undefined' || dataform.projectConfig.vars.envName === 'dev' ? "and ( right(_table_suffix, 8) >= format_date('%Y%m%d', date_sub(current_date(), interval 3 week)) or right(_table_suffix, 8) between format_date('%Y%m%d', date_sub(current_date(), interval 55 week)) and format_date('%Y%m%d',date_sub(current_date(), interval 1 year)))" : ""}
+
+/* if dev or feature branch, use limited TY and LY dates to reduce data processed while still allowing YoY comp testing */
+ -- ${typeof dataform.projectConfig.vars.envName === 'undefined' || dataform.projectConfig.vars.envName === 'dev' ? "and ( right(_table_suffix, 8) >= format_date('%Y%m%d', date_sub(current_date(), interval 3 week)) or right(_table_suffix, 8) between format_date('%Y%m%d', date_sub(current_date(), interval 55 week)) and format_date('%Y%m%d',date_sub(current_date(), interval 1 year)))" : ""}
