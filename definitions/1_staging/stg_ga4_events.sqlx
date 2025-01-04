@@ -1,16 +1,138 @@
 config {
     schema: "staging",
     description: "Provides raw hit level data export from Google Analytics 4. Each row represents a single event that occurred on A.com. Data is loaded from a native Google integration between GA4 and BigQuery. Information on this GA export is available here: https://support.google.com/analytics/answer/7029846?hl=en ",
-    type: "view"
+    type: "incremental",
+    bigquery: {
+        partitionBy: "event_date",
+        clusterBy: ["unique_session_id", "event_name"]
+    }
 }
 
-SELECT
-  *,
-  CURRENT_TIMESTAMP() AS row_loaded_at,
-  'ga4_events' AS data_source,
-  -- use ending 8 characters because realtime data stream has _intraday_202401xx string in _table_suffix
-  CAST(RIGHT(_table_suffix, 8) AS date format 'YYYYMMDD') AS event_date
-FROM
+pre_operations {
+  DECLARE
+    event_date_checkpoint DEFAULT (
+    ${
+        when(incremental(),
+            `select max(event_date) -3 from ${self()}`,
+        )
+    }
+    );
+    ${
+        when(incremental(),
+            `delete from ${self()} where event_date >= event_date_checkpoint`
+        )
+    }
+}
+
+
+WITH
+  unnested_events AS (
+  SELECT
+    TIMESTAMP_MICROS(event_timestamp) AS hit_started_at, -- this bundles some events into same timestamp
+    event_date,
+    event_name,
+    user_pseudo_id,
+    CONCAT(user_pseudo_id, " ",(
+      SELECT
+        value.int_value
+      FROM
+        UNNEST(event_params)
+      WHERE
+        KEY = 'ga_session_id')) AS unique_session_id,
+    ${helpers.getEventParam('entrances', 'int')},
+    ${helpers.getEventParam('view_type')},
+    ${helpers.getEventParam('variant_view_type')},
+    ${helpers.getEventParam('search_type', 'string')},
+    ${helpers.getEventParam('search_term', 'string')},
+    ${helpers.getEventParam('previous_click_component')},
+    ${helpers.getEventParam('previous_click_id')},
+    ${helpers.getEventParam('previous_url')},
+    ${helpers.getEventParam('error_type')},
+    ${helpers.getEventParam('method')},
+    ${helpers.getEventParam('error_location')},
+    ${helpers.getEventParam('error_message')},
+    ${helpers.getEventParam('checkout_type')},
+    ${helpers.getEventParam('checkout_method')},
+    ${helpers.getEventParam('checkout_step_name')},
+    ${helpers.getEventParam('payment_type')},
+    ${helpers.getEventParam('panel_name')},
+    ${helpers.getEventParam('bag_viewed_type')},
+    ${helpers.getEventParam('status')},
+    ${helpers.getEventParam('list_type')},
+    ${helpers.getEventParam('ga_session_id', 'int', 'session_start')},
+    --ga session id is in unix number timestamp
+    ${helpers.getEventParam('page_referrer')},
+    ${helpers.getEventParam('page_title')},
+    ${helpers.getEventParam('page_location')},
+    ${helpers.getEventParam('view_port')},
+    ${helpers.getEventParam('user_agent_string')},
+    device.web_info.hostname AS host_name,
+    CONCAT('/', REGEXP_REPLACE( (
+        SELECT
+          p.value.string_value
+        FROM
+          UNNEST(event_params) AS p
+        WHERE
+          p.key = 'page_location' ), r'^https?://[^/]+|[\?#].*|/en/|en/|/fr/|/us/|/intl/|.html|/default|en_CA', ''
+          -- clean up page_location to remove https://,intl/us/en etc.
+          )) AS page_path,
+        -- regex to replace unwanted elements of page_location to generate page_path
+        ${helpers.getEventParam('creative_name')},
+        --using this instead of items promotion_name field as directed by DAP
+        ${helpers.getEventParam('promotion_name')},
+        --using this instead of items promotion_name field as directed by DAP
+        ${helpers.getEventParam('promotion_id')},
+        --using this instead of items promotion_name field as directed by DAP
+      IF
+        (event_name = 'first_visit', 1,0) AS is_first_visit,
+        --general session attributes
+        ${helpers.getUserProperty('logged_in')},
+        ${helpers.getEventParam('ga_session_number', 'int')},
+        ${helpers.getEventParam('session_engaged', 'int')},
+        ${helpers.getUserProperty('customer_type', 'int')},
+        --traffic source
+        ${helpers.getEventParam('name', 'string', 'traffic_source_name')},
+        ${helpers.getEventParam('medium', 'string', 'traffic_source_medium')},
+        ${helpers.getEventParam('source', 'string', 'traffic_source_source')},
+        collected_traffic_source.manual_content AS traffic_source_ad_content,
+        collected_traffic_source.manual_term AS traffic_source_keyword,
+        collected_traffic_source.manual_campaign_name AS traffic_source_campaign,
+        collected_traffic_source.manual_campaign_id AS traffic_source_campaign_id,
+        --device
+        device.category AS device_category,
+        device.mobile_brand_name AS device_mobile_brand_name,
+        device.mobile_model_name AS device_mobile_model_name,
+        device.operating_system_version AS device_operating_system_version,
+        device.web_info.hostname AS device_web_info_hostname,
+        device.web_info.browser AS device_web_info_browser,
+        CAST(NULL AS string) AS device_screen_resolution,
+        --geo
+        geo.country AS geo_country,
+        geo.region AS geo_region,
+        geo.metro AS geo_metro,
+        geo.city AS geo_city,
+        CASE
+          WHEN ecommerce.transaction_id IN ('false', '(not set)') THEN NULL
+          ELSE ecommerce.transaction_id
+      END
+        AS transaction_id,
+        ARRAY(
+        SELECT
+          AS STRUCT SPLIT(items.item_id, '-')[SAFE_OFFSET(0)] AS generic_article_id, items.item_variant AS article_id,
+          CASE
+            WHEN event_name = 'purchase' THEN items.item_revenue
+            ELSE NULL
+        END
+          AS gross_sales_amount_local,
+          CASE
+            WHEN event_name = 'purchase' THEN items.quantity
+            ELSE NULL
+        END
+          AS gross_sales_quantity, SAFE_CAST(items.item_list_index AS int) AS product_list_position, ${helpers.getItemParam('delivery_method', 'string', 'service_subtype')}
+          --also known as delivery_method,
+        FROM
+          UNNEST(items) AS items ) AS article
+      FROM
   ${ref("events_*")}
 WHERE
   -- to account for 30 day session traffic source attribution lookback window
@@ -20,3 +142,104 @@ WHERE
   -- to remove events_fresh_ and events_intraday_ shards
   /* if dev or feature branch, use limited TY and LY dates to reduce data processed while still allowing YoY comp testing */
   -- ${typeof dataform.projectConfig.vars.envName === 'undefined' || dataform.projectConfig.vars.envName === 'dev' ? "and ( right(_table_suffix, 8) >= format_date('%Y%m%d', date_sub(current_date(), interval 3 week)) or right(_table_suffix, 8) between format_date('%Y%m%d', date_sub(current_date(), interval 55 week)) and format_date('%Y%m%d',date_sub(current_date(), interval 1 year)))" : ""}
+
+        ${
+            when(incremental(),
+                `and session_start_date_pt >= session_date_checkpoint`
+            )
+        }
+        )
+
+
+ -- final select
+    SELECT
+      CURRENT_TIMESTAMP() AS row_loaded_at,
+      data_source,
+      event_date,
+      unique_session_id,
+      user_pseudo_id,
+      session_start,
+      event_name,
+      transaction_id,
+      (
+      SELECT
+        SUM(gross_sales_amount_local)
+      FROM
+        UNNEST(article)) AS gross_sales_amount_local,
+      (
+      SELECT
+        SUM(gross_sales_quantity)
+      FROM
+        UNNEST(article)) AS gross_sales_quantity,
+      STRUCT( view_type,
+        variant_view_type,
+        previous_click_component,
+        previous_click_id,
+        previous_url,
+        panel_name,
+        status,
+        bag_viewed_type,
+        list_type,
+        method,
+        CASE
+          WHEN search_term = 'null' THEN NULL
+          ELSE search_term
+      END
+        AS search_term,
+        search_type,
+        error_location,
+        error_message,
+        checkout_type,
+        checkout_method,
+        checkout_step_name,
+        INITCAP(payment_type) AS payment_type,
+     
+        user_agent_string ) AS event_parameter,
+      hit_started_at,
+      ARRAY(
+      SELECT
+        AS STRUCT promotion_name, creative_name AS promotion_creative_variation, promotion_id ) AS promotion,
+      STRUCT( page_path,
+        SPLIT(page_path,'/')[SAFE_OFFSET(1)] AS page_path_level1,
+        SPLIT(page_path,'/')[SAFE_OFFSET(2)] AS page_path_level2,
+        SPLIT(page_path,'/')[SAFE_OFFSET(3)] AS page_path_level3,
+        SPLIT(page_path,'/')[SAFE_OFFSET(4)] AS page_path_level4,
+        SPLIT(page_path,'/')[SAFE_OFFSET(5)] AS page_path_level5,
+        host_name,
+        page_title,
+        page_location ) AS page,
+      article,
+      --general session attributes
+    IF
+      (event_name = 'first_visit', 1,0) AS is_first_visit,
+      logged_in,
+      ga_session_number,
+      session_engaged,
+      customer_type,
+      --traffic source
+      traffic_source_name,
+      CASE
+        WHEN REGEXP_CONTAINS(page_location, r'gclid=.+') AND traffic_source_source = 'google' THEN 'cpc'
+        /* Known GA4 misattribution bug */
+        ELSE traffic_source_medium
+    END
+      AS traffic_source_medium,
+      traffic_source_source,
+      traffic_source_ad_content,
+      traffic_source_keyword,
+      traffic_source_campaign,
+      traffic_source_campaign_id,
+      --device
+      device_category,
+      device_mobile_brand_name,
+      device_mobile_model_name,
+      device_operating_system_version,
+      device_web_info_browser,
+      device_screen_resolution,
+      --geo
+      geo_country,
+      geo_region,
+      geo_metro,
+      geo_city
+    FROM
+      unnested_events
