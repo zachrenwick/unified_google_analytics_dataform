@@ -83,6 +83,7 @@ SELECT
       WHEN event_info.event_category = 'account' AND event_info.event_action = 'create account' THEN TRUE
       ELSE FALSE
   END
+    AS is_account_creation_completed_event,
     CASE
       WHEN hit_type = 'page' AND page.page_path LIKE '%/checkout%' THEN TRUE
       ELSE FALSE

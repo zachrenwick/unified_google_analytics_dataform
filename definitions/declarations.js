@@ -2,8 +2,8 @@
   "ga_sessions_*"
 ].forEach((name) =>
   declare({
-    database: "plenary-network-243016", //set your Google Analytics Universal Analytics database/dataset ID here
-    schema: "141585386", //this is the Google Analytics UA master property view ID
+    database: "bigquery-public-data",  //set your Google Analytics Universal Analytics database/dataset ID here
+    schema: "google_analytics_sample", //this is the Google Analytics UA master property view ID
     name,
   })
 );
