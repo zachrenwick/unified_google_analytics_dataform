@@ -15,7 +15,7 @@ WITH
     -- this bundles some events into same timestamp. need to create your own hit timestamp event parameter to get around this?
     CAST(RIGHT(_table_suffix, 8) AS date format 'YYYYMMDD') AS event_date,
     event_name,
-    'ga4_events' as data_source,
+    'ga4_events' AS data_source,
     user_pseudo_id,
     CONCAT(user_pseudo_id, ".",(
       SELECT
@@ -76,49 +76,48 @@ WITH
         AND _table_suffix NOT LIKE "%fresh%"
         AND CAST(RIGHT(_table_suffix, 8) AS date format 'YYYYMMDD') >= event_date_checkpoint )
         -- final select
-  SELECT
-    CURRENT_TIMESTAMP() AS row_loaded_at,
-    event_date,
-    ga_session_key,
-    user_pseudo_id,
-    session_start,
-    event_name,
-    hit_started_at,
-    STRUCT( page_path,
-      host_name,
-      page_title,
-      page_location ) AS page,
-  IF
-    (event_name = 'first_visit', 1,0) AS is_first_visit,
-    logged_in,
-    ga_session_number,
-    session_engaged,
-    --traffic source
-    CASE
-      WHEN REGEXP_CONTAINS(page_location, r'gclid=.+') AND traffic_source_source = 'google' THEN 'cpc'
-      /* Known GA4 misattribution bug */
-      ELSE traffic_source_medium
-  END
-    AS traffic_source_medium,
-    traffic_source_source,
-    traffic_source_ad_content,
-    traffic_source_keyword,
-    traffic_source_campaign,
-    traffic_source_campaign_id,
-    --device
-    device_category,
-    device_mobile_brand_name,
-    device_mobile_model_name,
-    device_operating_system_version,
-    device_web_info_browser,
-    device_screen_resolution,
-    --geo
-    geo_country,
-    geo_region,
-    geo_metro,
-    geo_city
-  FROM
-    unnested_events
+    SELECT
+      CURRENT_TIMESTAMP() AS row_loaded_at,
+      event_date,
+      ga_session_key,
+      user_pseudo_id,
+      session_start,
+      event_name,
+      hit_started_at,
+      STRUCT( page_path,
+        host_name,
+        page_title ) AS page,
+    IF
+      (event_name = 'first_visit', 1,0) AS is_first_visit,
+      logged_in,
+      ga_session_number,
+      session_engaged,
+      --traffic source
+      CASE
+        WHEN REGEXP_CONTAINS(page_location, r'gclid=.+') AND traffic_source_source = 'google' THEN 'cpc'
+        /* Known GA4 misattribution bug */
+        ELSE traffic_source_medium
+    END
+      AS traffic_source_medium,
+      traffic_source_source,
+      traffic_source_ad_content,
+      traffic_source_keyword,
+      traffic_source_campaign,
+      traffic_source_campaign_id,
+      --device
+      device_category,
+      device_mobile_brand_name,
+      device_mobile_model_name,
+      device_operating_system_version,
+      device_web_info_browser,
+      device_screen_resolution,
+      --geo
+      geo_country,
+      geo_region,
+      geo_metro,
+      geo_city
+    FROM
+      unnested_events
 
 pre_operations {
   DECLARE

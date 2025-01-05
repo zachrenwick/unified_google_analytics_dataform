@@ -28,7 +28,7 @@ SELECT
         ELSE NULL
     END
       = 1, TRUE, FALSE) AS is_exit,
-    CAST(NULL AS int) AS hit_time_from_session_start,
+    TIMESTAMP_DIFF(MAX(hit_started_at) OVER (PARTITION BY ga_session_key, event_date), MIN(hit_started_at) OVER (PARTITION BY ga_session_key, event_date), SECOND) AS hit_time_from_session_start,
     hit_started_at,
     page,
     -- transaction_id,
