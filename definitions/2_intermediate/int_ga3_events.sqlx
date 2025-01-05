@@ -11,6 +11,7 @@ SELECT
   CURRENT_TIMESTAMP() AS row_loaded_at,
   event_date,
   ga_session_key,
+  user_pseudo_id,
   STRUCT( CAST(NULL AS string) AS event_name,
     hit_number,
     hit_type,

@@ -1,0 +1,88 @@
+config {
+    schema: "intermediate",
+    type: "incremental",
+    bigquery: {
+        partitionBy: "event_date",
+        clusterBy: ["ga_session_key"]
+    }
+}
+
+  /* Special care must be made to ensure the schemas align exactly between the two datasets */
+SELECT
+  row_loaded_at,
+  ga_session_key,
+  user_pseudo_id,
+  event_date,
+  STRUCT( hit. CAST(NULL AS string) AS event_name,
+    hit.hit_number,
+    hit.hit_type,
+    hit.is_entrance,
+    hit.is_exit,
+    hit.hit_time_from_session_start,
+    hit.hit_started_at,
+    page,
+    hit.is_contact_us_event,
+    hit.is_product_click_event,
+    hit.is_promotion_seen_event,
+    hit.is_promotion_click_event,
+    hit.is_filter_applied_event,
+    hit.is_add_to_bag_event,
+    hit.is_remove_from_bag_event,
+    hit.is_mylist_seen_event,
+    hit.is_account_creation_completed_event ) AS hit
+FROM
+  ${ref("int_ga3_events")}
+WHERE
+  event_date < ${constants.ga4_cutover_date}
+  ${
+      when(incremental(),
+          `and 1=0`
+      )
+  }
+UNION ALL
+SELECT
+  row_loaded_at,
+  ga_session_key,
+  user_pseudo_id,
+  event_date,
+  STRUCT( hit. CAST(NULL AS string) AS event_name,
+    hit.hit_number,
+    hit.hit_type,
+    hit.is_entrance,
+    hit.is_exit,
+    hit.hit_time_from_session_start,
+    hit.hit_started_at,
+    page,
+    hit.is_contact_us_event,
+    hit.is_product_click_event,
+    hit.is_promotion_seen_event,
+    hit.is_promotion_click_event,
+    hit.is_filter_applied_event,
+    hit.is_add_to_bag_event,
+    hit.is_remove_from_bag_event,
+    hit.is_mylist_seen_event,
+    hit.is_account_creation_completed_event ) AS hit
+FROM
+  ${ref("int_ga4_events")}
+WHERE
+  event_date >= ${constants.ga4_cutover_date}
+  ${
+      when(incremental(),
+          `and event_date >= event_date_checkpoint`
+      )
+  }
+
+pre_operations {
+  DECLARE
+    event_date_checkpoint DEFAULT (
+    ${
+        when(incremental(),
+            `select max(session_date) -3 from ${self()}`,
+            `select date("2000-01-01")`)
+    }
+    );
+    ${
+        when(incremental(),
+            `delete from ${self()} where event_date >= event_date_checkpoint`)
+    }
+}

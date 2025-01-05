@@ -25,7 +25,7 @@ SELECT
       ELSE 'Returning Visit'
   END
     AS session_type,
-    traffic_source,
+    last_non_direct_traffic_source,
     device,
     STRUCT( location.country_name ) AS location,
     --   CASE
