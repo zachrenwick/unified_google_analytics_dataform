@@ -1,6 +1,6 @@
 config {
     schema: "staging",
-    description: "WHAT: Provides raw hit level data export from Google Analytics (Universal Analytics). Each row represents a record for every digital session and each hit level event lives within the hits struct. Data is loaded from a native Google integration between GA and BigQuery. Information on this GA export is available here: https://support.google.com/analytics/answer/3437719?hl=en . Partitioned by session_start_date_pt and clustered by data_source and unique_session_id. \r\nWHEN: Data is available for all digital events dating back to FY2020. \r\nWHO: eCommerce \r\nWHY: Provides the ability to analyze each session and event that is tracked on A.com.",
+    description: "WHAT: Provides raw hit level data export from Google Analytics (Universal Analytics). Each row represents a record for every digital session and each hit level event lives within the hits struct. Data is loaded from a native Google integration between GA and BigQuery. Information on this GA export is available here: https://support.google.com/analytics/answer/3437719?hl=en . Provides the ability to analyze each session and event that is tracked on your website.",
     type: "incremental",
     bigquery: {
         partitionBy: "event_date",
@@ -53,20 +53,9 @@ SELECT
       LOWER(hits.eventInfo.eventAction) AS event_action,
       LOWER(hits.eventInfo.eventLabel) AS event_label,
       hits.eventInfo.eventValue AS event_value ) AS event_info, STRUCT( hits.page.pagePath AS page_path,
-      SPLIT(split(hits.page.pagePath,
-          '?') [SAFE_OFFSET(0)],'/')[SAFE_OFFSET(1)] AS page_path_level1,
-      SPLIT(split(hits.page.pagePath,
-          '?') [SAFE_OFFSET(0)],'/')[SAFE_OFFSET(2)] AS page_path_level2,
-      SPLIT(split(hits.page.pagePath,
-          '?') [SAFE_OFFSET(0)],'/')[SAFE_OFFSET(3)] AS page_path_level3,
-      SPLIT(split(hits.page.pagePath,
-          '?') [SAFE_OFFSET(0)],'/')[SAFE_OFFSET(4)] AS page_path_level4,
-      SPLIT(split(hits.page.pagePath,
-          '?') [SAFE_OFFSET(0)],'/')[SAFE_OFFSET(5)] AS page_path_level5,
       hits.page.hostname AS host_name,
       hits.page.pageTitle AS page_title,
-      CAST(NULL AS string) AS page_location ) AS page, STRUCT( hits.transaction.transactionID AS transaction_id,
-      hits.transaction.localTransactionRevenue AS local_transaction_revenue ) AS TRANSACTION
+      CAST(NULL AS string) AS page_location ) AS page
   FROM
     UNNEST(hits) AS hits ) AS hit
 FROM

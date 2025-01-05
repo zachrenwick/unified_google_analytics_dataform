@@ -1,0 +1,50 @@
+config {
+    schema: "intermediate",
+    type: "incremental",
+    bigquery: {
+        partitionBy: "event_date",
+        clusterBy: ["ga_session_key"]
+    }
+}
+
+
+/* Special care must be made to ensure the schemas align exactly between the two datasets */
+
+SELECT
+  *
+FROM
+  ${ref("int_ga3_sessions")}
+WHERE
+  session_start_date_pt < ${constants.ga4_cutover_date}
+  ${
+      when(incremental(),
+          `and 1=0`
+      )
+  }
+UNION ALL
+SELECT
+  *
+FROM
+  ${ref("int_ga4_sessions")}
+WHERE
+  session_start_date_pt >= ${constants.ga4_cutover_date}
+  ${
+      when(incremental(),
+          `and session_date >= session_date_checkpoint`
+      )
+  }
+
+pre_operations {
+  DECLARE
+    session_date_checkpoint DEFAULT (
+    ${
+        when(incremental(),
+            `select max(session_date) -3 from ${self()}`,
+            `select date("2000-01-01")`)
+    }
+    );
+    ${
+        when(incremental(),
+            `delete from ${self()} where session_date >= session_date_checkpoint`)
+    }
+}

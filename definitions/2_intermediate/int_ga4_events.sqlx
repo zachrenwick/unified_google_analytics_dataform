@@ -1,5 +1,5 @@
 config {
-    schema: "modeled_ecommerce",
+    schema: "interemediate",
     type: "incremental",
     bigquery: {
         partitionBy: "event_date",

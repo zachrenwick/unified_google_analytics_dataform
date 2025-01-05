@@ -1,0 +1,279 @@
+config {
+    schema: "intermediate",
+    type: "incremental",
+    bigquery: {
+        partitionBy: "session_date",
+        clusterBy: ["ga_session_key"]
+    },
+    assertions: {
+        nonNull: ["row_id"],
+        uniqueKey: ["row_id"]
+    }
+}
+
+SELECT
+  CURRENT_TIMESTAMP() AS row_loaded_at,
+  SHA256(ga_session_key || event_date ) AS row_id,
+  data_source,
+  event_date AS session_date,
+  ga_session_key,
+  STRUCT( user_pseudo_id,
+    session_number,
+    session_start_time_pt,
+    CASE
+      WHEN total.new_session_count = 1 THEN 'New Visit'
+      ELSE 'Returning Visit'
+  END
+    AS session_type,
+    traffic_source,
+    device,
+    STRUCT( location.country_name ) AS location,
+    --   CASE
+    --     WHEN total.page_view_count >= 2 OR is_checkout_complete_session IS TRUE THEN TRUE
+    --     ELSE FALSE
+    -- END
+    --   AS is_engaged_session,
+    STRUCT( total.bounce_count,
+    total.new_session_count,
+    total.page_view_count,
+    --gross_sales_amount_local,
+    total.transaction_count,
+    --unique_search_count,
+    total.session_count
+    --session_duration_in_seconds
+    ) AS total ) AS digital_session,
+    --   CASE
+    --     WHEN is_checkout_login_seen_session IS TRUE AND (is_checkout_shipping_or_pickup_seen_session IS TRUE OR is_checkout_payment_seen_session IS TRUE OR is_checkout_review_seen_session IS TRUE OR is_checkout_complete_session IS TRUE OR total.transaction_count > 0) THEN TRUE
+    --     ELSE FALSE
+    -- END
+    --   AS is_checkout_login_continued_session,
+    --   CASE
+    --     WHEN is_checkout_shipping_or_pickup_seen_session IS TRUE AND (is_checkout_payment_seen_session IS TRUE OR is_checkout_review_seen_session IS TRUE OR is_checkout_complete_session IS TRUE OR total.transaction_count > 0) THEN TRUE
+    --     ELSE FALSE
+    -- END
+    --   AS is_checkout_shipping_or_pickup_continued_session,
+    --   CASE
+    --     WHEN is_checkout_payment_seen_session IS TRUE AND (is_checkout_review_seen_session IS TRUE OR is_checkout_complete_session IS TRUE OR total.transaction_count > 0) THEN TRUE
+    --     ELSE FALSE
+    -- END
+    --   AS is_checkout_payment_continued_session,
+    --   CASE
+    --     WHEN is_checkout_review_seen_session IS TRUE AND (is_checkout_complete_session IS TRUE OR total.transaction_count > 0) THEN TRUE
+    --     ELSE FALSE
+    -- END
+    --   AS is_checkout_review_continued_session,
+    --   CASE
+    --     WHEN is_account_creation_completed_order_session IS TRUE AND session_login_status = 'not logged in' THEN TRUE
+    --     ELSE FALSE
+    -- END
+    --   AS is_guest_account_creation_session,
+    --   CASE
+    --     WHEN is_homepage_seen_session = TRUE THEN gross_sales_amount_local
+    --     ELSE 0
+    -- END
+    --   AS homepage_seen_session_gross_sales_amount_local,
+    --   CASE
+    --     WHEN is_plp_seen_session = TRUE THEN gross_sales_amount_local
+    --     ELSE 0
+    -- END
+    --   AS plp_seen_session_sales_amount_local,
+    --   CASE
+    --     WHEN is_search_used_session = TRUE THEN gross_sales_amount_local
+    --     ELSE 0
+    -- END
+    --   AS search_used_session_sales_amount_local,
+    --   CASE
+    --     WHEN is_pdp_seen_session = TRUE THEN gross_sales_amount_local
+    --     ELSE 0
+    -- END
+    --   AS pdp_seen_session_sales_amount_local,
+    --   CASE
+    --     WHEN is_bag_seen_session = TRUE THEN gross_sales_amount_local
+    --     ELSE 0
+    -- END
+    --   AS bag_seen_session_sales_amount_local,
+    --   CASE
+    --     WHEN is_minibag_seen_session = TRUE THEN gross_sales_amount_local
+    --     ELSE 0
+    -- END
+    --   AS minibag_seen_session_sales_amount_local,
+    --   CASE
+    --     WHEN is_add_to_bag_session = TRUE THEN gross_sales_amount_local
+    --     ELSE 0
+    -- END
+    --   AS add_to_bag_session_sales_amount_local,
+    --   CASE
+    --     WHEN is_add_to_mylist_session = TRUE THEN gross_sales_amount_local
+    --     ELSE 0
+    -- END
+    --   AS add_to_mylist_session_sales_amount_local,
+    --   CASE
+    --     WHEN is_mylist_seen_session = TRUE THEN gross_sales_amount_local
+    --     ELSE 0
+    -- END
+    --   AS mylist_seen_session_sales_amount_local,
+    --   CASE
+    --     WHEN is_checkout_seen_session = TRUE THEN gross_sales_amount_local
+    --     ELSE 0
+    -- END
+    --   AS checkout_seen_session_sales_amount_local,
+    --   CASE
+    --     WHEN is_quickview_seen_session = TRUE THEN gross_sales_amount_local
+    --     ELSE 0
+    -- END
+    --   AS quickview_seen_session_sales_amount_local,
+    --   CASE
+    --     WHEN is_checkout_complete_session = TRUE THEN gross_sales_amount_local
+    --     ELSE 0
+    -- END
+    --   AS checkout_complete_session_sales_amount_local,
+    --   --funnel steps converting sessions
+    --   CASE
+    --     WHEN is_homepage_seen_session = TRUE AND total.transaction_count > 0 THEN TRUE
+    --     ELSE FALSE
+    -- END
+    --   AS is_homepage_seen_session_conversion,
+    --   CASE
+    --     WHEN is_plp_seen_session = TRUE AND total.transaction_count > 0 THEN TRUE
+    --     ELSE FALSE
+    -- END
+    --   AS is_plp_seen_session_conversion,
+    --   CASE
+    --     WHEN is_pdp_seen_session = TRUE AND total.transaction_count > 0 THEN TRUE
+    --     ELSE FALSE
+    -- END
+    --   AS is_pdp_seen_session_conversion,
+    --   CASE
+    --     WHEN is_bag_seen_session = TRUE AND total.transaction_count > 0 THEN TRUE
+    --     ELSE FALSE
+    -- END
+    --   AS is_bag_seen_session_conversion,
+    --   CASE
+    --     WHEN is_minibag_seen_session = TRUE AND total.transaction_count > 0 THEN TRUE
+    --     ELSE FALSE
+    -- END
+    --   AS is_minibag_seen_session_conversion,
+    --   CASE
+    --     WHEN is_add_to_bag_session = TRUE AND total.transaction_count > 0 THEN TRUE
+    --     ELSE FALSE
+    -- END
+    --   AS is_add_to_bag_session_conversion,
+    --   CASE
+    --     WHEN is_add_to_mylist_session = TRUE AND total.transaction_count > 0 THEN TRUE
+    --     ELSE FALSE
+    -- END
+    --   AS is_add_to_mylist_session_conversion,
+    --   CASE
+    --     WHEN is_mylist_seen_session = TRUE AND total.transaction_count > 0 THEN TRUE
+    --     ELSE FALSE
+    -- END
+    --   AS is_mylist_seen_session_conversion,
+    --   CASE
+    --     WHEN is_checkout_login_seen_session = TRUE AND total.transaction_count > 0 THEN TRUE
+    --     ELSE FALSE
+    -- END
+    --   AS is_checkout_login_seen_converting_session,
+    --   CASE
+    --     WHEN is_checkout_shipping_or_pickup_seen_session = TRUE AND total.transaction_count > 0 THEN TRUE
+    --     ELSE FALSE
+    -- END
+    --   AS is_checkout_shipping_or_pickup_seen_converting_session,
+    --   CASE
+    --     WHEN is_checkout_payment_seen_session = TRUE AND total.transaction_count > 0 THEN TRUE
+    --     ELSE FALSE
+    -- END
+    --   AS is_checkout_payment_seen_converting_session,
+    --   CASE
+    --     WHEN is_checkout_review_seen_session = TRUE AND total.transaction_count > 0 THEN TRUE
+    --     ELSE FALSE
+    -- END
+    --   AS is_checkout_review_seen_converting_session,
+    --   CASE
+    --     WHEN is_checkout_seen_session = TRUE AND total.transaction_count > 0 THEN TRUE
+    --     ELSE FALSE
+    -- END
+    --   AS is_checkout_seen_session_conversion,
+    --   CASE
+    --     WHEN is_checkout_complete_session = TRUE AND total.transaction_count > 0 THEN TRUE
+    --     ELSE FALSE
+    -- END
+    --   AS is_checkout_complete_session_conversion,
+    --   CASE
+    --     WHEN is_quickview_seen_session = TRUE AND total.transaction_count > 0 THEN TRUE
+    --     ELSE FALSE
+    -- END
+    --   AS is_quickview_seen_session_conversion,
+    --   CASE
+    --     WHEN is_account_page_seen_session = TRUE AND max_account_page_seen_hit_number < max_checkout_complete_hit_number THEN TRUE
+    --     ELSE FALSE
+    -- END
+    --   AS is_account_page_seen_session_conversion,
+    --   CASE
+    --     WHEN total.transaction_count > 0 THEN TRUE
+    --     ELSE FALSE
+    -- END
+    --   AS total_order_confirmation_conversion,
+    --   --navigation
+    --   CASE
+    --     WHEN is_navigation_used_session = TRUE AND total.transaction_count > 0 THEN TRUE
+    --     ELSE FALSE
+    -- END
+    --   AS is_navigation_used_session_conversion,
+    --   CASE
+    --     WHEN is_primary_navigation_used_session = TRUE AND total.transaction_count > 0 THEN TRUE
+    --     ELSE FALSE
+    -- END
+    --   AS is_primary_navigation_used_session_conversion,
+    --   CASE
+    --     WHEN is_category_navigation_used_session = TRUE AND total.transaction_count > 0 THEN TRUE
+    --     ELSE FALSE
+    -- END
+    --   AS is_category_navigation_used_session_conversion,
+    --   CASE
+    --     WHEN is_visual_navigation_used_session = TRUE AND total.transaction_count > 0 THEN TRUE
+    --     ELSE FALSE
+    -- END
+    --   AS is_visual_navigation_used_session_conversion,
+    --   --search
+    --   CASE
+    --     WHEN is_search_used_session = TRUE AND total.transaction_count > 0 THEN TRUE
+    --     ELSE FALSE
+    -- END
+    --   AS is_search_used_session_conversion,
+    --   CASE
+    --     WHEN is_regular_search_result_used_session = TRUE AND total.transaction_count > 0 THEN TRUE
+    --     ELSE FALSE
+    -- END
+    --   AS is_regular_search_result_used_session_conversion,
+    --   CASE
+    --     WHEN is_plp_redirect_search_used_session = TRUE AND total.transaction_count > 0 THEN TRUE
+    --     ELSE FALSE
+    -- END
+    --   AS is_plp_redirect_search_used_session_conversion,
+    --   CASE
+    --     WHEN is_pdp_redirect_search_used_session = TRUE AND total.transaction_count > 0 THEN TRUE
+    --     ELSE FALSE
+    -- END
+    --   AS is_pdp_redirect_search_used_session_conversion,
+    --   CASE
+    --     WHEN is_content_suggestion_search_used_session = TRUE AND total.transaction_count > 0 THEN TRUE
+    --     ELSE FALSE
+    -- END
+    --   AS is_content_suggestion_search_used_session_conversion,
+    --   CASE
+    --     WHEN is_plp_suggestion_search_used_session = TRUE AND total.transaction_count > 0 THEN TRUE
+    --     ELSE FALSE
+    -- END
+    --   AS is_plp_suggestion_search_used_session_conversion,
+    --   CASE
+    --     WHEN is_pdp_suggestion_search_used_session = TRUE AND total.transaction_count > 0 THEN TRUE
+    --     ELSE FALSE
+    -- END
+    --   AS is_pdp_suggestion_search_used_session_conversion ) AS session_conversions
+  FROM
+    ${ref("stg_ga3_events")} AS events
+    ${
+        when(incremental(),
+            `where 0=1`
+        )
+    }
