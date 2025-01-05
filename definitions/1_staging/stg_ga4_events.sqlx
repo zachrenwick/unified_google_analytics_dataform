@@ -15,6 +15,7 @@ WITH
     -- this bundles some events into same timestamp. need to create your own hit timestamp event parameter to get around this?
     CAST(RIGHT(_table_suffix, 8) AS date format 'YYYYMMDD') AS event_date,
     event_name,
+    'ga4_events' as data_source,
     user_pseudo_id,
     CONCAT(user_pseudo_id, ".",(
       SELECT

@@ -50,9 +50,10 @@ WITH
       -- final select to bring in struct format
 SELECT
   CURRENT_TIMESTAMP() AS row_loaded_at,
+  SHA256(distinct_session_attributes.ga_session_key || event_date ) AS row_id,
   distinct_session_attributes.session_date,
   distinct_session_attributes.ga_session_key,
-  --data_source,
+  'ga4_events' as data_source,
   STRUCT( distinct_session_attributes.user_pseudo_id,
   session_number,
   session_login_status,
@@ -73,7 +74,7 @@ END
     last_non_direct.traffic_source_campaign_id AS campaign_id,
     last_non_direct.traffic_source_keyword AS keyword,
     last_non_direct.traffic_source_medium AS medium,
-    last_non_direct.traffic_source_source AS source,
+    last_non_direct.traffic_source_source AS SOURCE,
     CASE
     -- Cross-network: Campaign Name contains "cross-network"
       WHEN REGEXP_CONTAINS(last_non_direct.traffic_source_campaign, r"cross-network") THEN 'Paid Search'
@@ -159,9 +160,9 @@ END
     /* not available in the BigQuery export 20240320 */
     device_browser AS browser ) AS device,
   STRUCT( geo_country AS country_name
-    --geo_state_name AS province_state_name,
-    -- geo_city_name AS city_name
-    ) AS location ) AS digital_session
+  --geo_state_name AS province_state_name,
+  -- geo_city_name AS city_name
+  ) AS location ) AS digital_session
   FROM
     distinct_session_attributes
   LEFT OUTER JOIN

@@ -12,7 +12,6 @@ SELECT
   CURRENT_TIMESTAMP() AS row_loaded_at,
   fullVisitorId || visitId AS ga_session_key,
   -- note a session can span multiple days
-  'ga3_sessions' AS data_source,
   fullVisitorId AS user_pseudo_id,
   visitNumber AS session_number,
   DATETIME( TIMESTAMP_SECONDS(visitStartTime), "America/Vancouver") AS session_start_time_pt,

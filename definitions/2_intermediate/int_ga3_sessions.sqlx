@@ -14,7 +14,7 @@ config {
 SELECT
   CURRENT_TIMESTAMP() AS row_loaded_at,
   SHA256(ga_session_key || event_date ) AS row_id,
-  data_source,
+  'ga3_sessions' AS data_source,
   event_date AS session_date,
   ga_session_key,
   STRUCT( user_pseudo_id,

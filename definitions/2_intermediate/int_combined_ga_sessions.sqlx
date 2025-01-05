@@ -15,7 +15,7 @@ SELECT
 FROM
   ${ref("int_ga3_sessions")}
 WHERE
-  session_start_date_pt < ${constants.ga4_cutover_date}
+  session_date < ${constants.ga4_cutover_date}
   ${
       when(incremental(),
           `and 1=0`
@@ -27,7 +27,7 @@ SELECT
 FROM
   ${ref("int_ga4_sessions")}
 WHERE
-  session_start_date_pt >= ${constants.ga4_cutover_date}
+  session_date >= ${constants.ga4_cutover_date}
   ${
       when(incremental(),
           `and session_date >= session_date_checkpoint`
